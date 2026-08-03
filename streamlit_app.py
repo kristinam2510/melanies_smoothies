@@ -42,7 +42,8 @@ ingredients_list = st.multiselect(
     max_selections=5
 )
 
-ingredients_string = ""
+# Store FRUIT_NAME values
+ingredients_string = ", ".join(ingredients_list)
 
 # -----------------------------
 # Nutrition Information
@@ -51,8 +52,7 @@ if ingredients_list:
 
     for fruit_chosen in ingredients_list:
 
-        ingredients_string += fruit_chosen + " "
-
+        # Get SEARCH_ON only for API lookup
         search_on = pd_df.loc[
             pd_df["FRUIT_NAME"] == fruit_chosen,
             "SEARCH_ON"
@@ -70,17 +70,12 @@ if ingredients_list:
 
             data = response.json()
 
-            # Debug (optional)
-            # st.write(data)
-
             st.subheader(f"{fruit_chosen} Nutrition Information")
 
             if "error" in data:
                 st.error(data["error"])
 
             else:
-
-                # Convert any JSON response into a dataframe
                 if isinstance(data, dict):
 
                     rows = []
@@ -109,11 +104,16 @@ if ingredients_list:
         except Exception as e:
             st.error(f"API Error: {e}")
 
-    # -----------------------------
-    # Submit Order
-    # -----------------------------
-    if st.button("Submit Order"):
+# -----------------------------
+# Submit Order
+# -----------------------------
+if st.button("Submit Order"):
 
+    if not name_on_order:
+        st.error("Please enter your name.")
+    elif not ingredients_list:
+        st.error("Please select at least one fruit.")
+    else:
         insert_sql = """
         INSERT INTO smoothies.public.orders
         (ingredients, name_on_order)
@@ -123,9 +123,12 @@ if ingredients_list:
         session.sql(
             insert_sql,
             params=[
-                ingredients_string.strip(),
+                ingredients_string,      # Stores FRUIT_NAME values
                 name_on_order
             ]
         ).collect()
 
         st.success("✅ Your Smoothie has been ordered!")
+        st.write("### Order Details")
+        st.write(f"**Name:** {name_on_order}")
+        st.write(f"**Ingredients:** {ingredients_string}")
