@@ -1,56 +1,122 @@
-# Import python packages
 import streamlit as st
-from snowflake.snowpark.functions import col
+import pandas as pd
 import requests
+from snowflake.snowpark.functions import col
 
-# Write directly to the app
-st.title("Customize Your Smoothie :cup_with_straw: ")
-st.write(
-  """Choose the fruits you want in your custom Smoothie!
-  """)
+# -----------------------------
+# Page Title
+# -----------------------------
+st.title("🥤 Customize Your Smoothie")
+st.write("Choose the fruits you want in your custom smoothie!")
 
-name_on_order= st.text_input('Name on Smoothie:')
-st.write('The name of your smoothie will be:', name_on_order)
-cnx=st.connection("snowflake")
+# -----------------------------
+# Customer Name
+# -----------------------------
+name_on_order = st.text_input("Name on Smoothie:")
+
+if name_on_order:
+    st.write(f"The name on your smoothie will be **{name_on_order}**.")
+
+# -----------------------------
+# Connect to Snowflake
+# -----------------------------
+cnx = st.connection("snowflake")
 session = cnx.session()
-my_dataframe = session.table("smoothies.public.fruit_options").select(
-    col("FRUIT_NAME"),
-    col("SEARCH_ON")
+
+fruit_df = (
+    session.table("smoothies.public.fruit_options")
+    .select(
+        col("FRUIT_NAME"),
+        col("SEARCH_ON")
+    )
 )
-#st.dataframe(data=my_dataframe, use_container_width=True)
 
-#Convert SnowPark dataframe to Pandas Dataframe so we can use LOC function
-pd_df=my_dataframe.to_pandas()
-#st.dataframe(pd_df)
-#st.stop()
+# Convert Snowpark DataFrame to Pandas
+pd_df = fruit_df.to_pandas()
 
+# -----------------------------
+# Fruit Selection
+# -----------------------------
 ingredients_list = st.multiselect(
     "Choose up to 5 ingredients:",
     pd_df["FRUIT_NAME"].tolist(),
     max_selections=5
 )
 
+ingredients_string = ""
 
+# -----------------------------
+# Display Nutrition Information
+# -----------------------------
 if ingredients_list:
-    ingredients_string=''
+
     for fruit_chosen in ingredients_list:
-        ingredients_string+=fruit_chosen+ ' '
-        search_on=pd_df.loc[pd_df['FRUIT_NAME'] == fruit_chosen, 'SEARCH_ON'].iloc[0]
-        st.write('The search value for ', fruit_chosen,' is ', search_on, '.')
-        st.subheader(fruit_chosen + 'Nutrition Information')
-        smoothiefroot_response = requests.get(
-   f"https://www.smoothiefroot.com/api/fruit/{search_on}"
-)
-        sf_df=st.dataframe(data=smoothiefroot_response.json(),use_container_width=True)
-    #st.write(ingredients_string)
 
-    my_insert_stmt = """ insert into smoothies.public.orders(ingredients,name_on_order)
-                    values ('""" + ingredients_string + """','"""+name_on_order+ """')"""
-    #st.write(my_insert_stmt)
-    time_to_insert=st.button('Submit Order')
+        ingredients_string += fruit_chosen + " "
 
-    if time_to_insert:
-        session.sql(my_insert_stmt).collect()
-        st.success('Your Smoothie is ordered!', icon="✅")
+        # Get API search value
+        search_on = pd_df.loc[
+            pd_df["FRUIT_NAME"] == fruit_chosen,
+            "SEARCH_ON"
+        ].iloc[0]
 
+        st.write(
+            f"Searching nutrition information for **{fruit_chosen}** "
+            f"using search value **{search_on}**."
+        )
 
+        # Call API
+        response = requests.get(
+            f"https://www.smoothiefroot.com/api/fruit/{search_on}"
+        )
+
+        if response.status_code == 200:
+
+            data = response.json()
+
+            if "error" in data:
+                st.error(
+                    f"No nutrition information was found for {fruit_chosen}."
+                )
+
+            else:
+                st.subheader(f"{fruit_chosen} Nutrition Information")
+
+                # Fruit details
+                st.write(f"**Scientific Name:** {data['name']}")
+                st.write(f"**Genus:** {data['genus']}")
+                st.write(f"**Family:** {data['family']}")
+                st.write(f"**Order:** {data['order']}")
+
+                # Nutrition Table
+                nutrition_df = pd.DataFrame(
+                    data["nutritions"].items(),
+                    columns=["Nutrient", "Amount"]
+                )
+
+                st.dataframe(
+                    nutrition_df,
+                    use_container_width=True
+                )
+
+        else:
+            st.error(f"Unable to retrieve data for {fruit_chosen}.")
+
+    # -----------------------------
+    # Submit Order
+    # -----------------------------
+    if st.button("Submit Order"):
+
+        session.sql(
+            """
+            INSERT INTO smoothies.public.orders
+            (ingredients, name_on_order)
+            VALUES (?, ?)
+            """,
+            params=[
+                ingredients_string.strip(),
+                name_on_order
+            ]
+        ).collect()
+
+        st.success("✅ Your smoothie has been ordered!")
