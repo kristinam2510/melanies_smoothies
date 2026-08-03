@@ -42,8 +42,8 @@ ingredients_list = st.multiselect(
     max_selections=5
 )
 
-# Store FRUIT_NAME values
-ingredients_string = ", ".join(ingredients_list)
+# This list will store the SEARCH_ON values
+search_on_list = []
 
 # -----------------------------
 # Nutrition Information
@@ -52,11 +52,14 @@ if ingredients_list:
 
     for fruit_chosen in ingredients_list:
 
-        # Get SEARCH_ON only for API lookup
+        # Get the SEARCH_ON value for the selected fruit
         search_on = pd_df.loc[
             pd_df["FRUIT_NAME"] == fruit_chosen,
             "SEARCH_ON"
         ].iloc[0]
+
+        # Save SEARCH_ON value for inserting into Snowflake
+        search_on_list.append(search_on)
 
         st.write(
             f"Searching nutrition information for **{fruit_chosen}** "
@@ -111,9 +114,15 @@ if st.button("Submit Order"):
 
     if not name_on_order:
         st.error("Please enter your name.")
+
     elif not ingredients_list:
-        st.error("Please select at least one fruit.")
+        st.error("Please choose at least one fruit.")
+
     else:
+
+        # Store SEARCH_ON values instead of FRUIT_NAME
+        ingredients_string = ", ".join(search_on_list)
+
         insert_sql = """
         INSERT INTO smoothies.public.orders
         (ingredients, name_on_order)
@@ -123,12 +132,14 @@ if st.button("Submit Order"):
         session.sql(
             insert_sql,
             params=[
-                ingredients_string,      # Stores FRUIT_NAME values
+                ingredients_string,
                 name_on_order
             ]
         ).collect()
 
         st.success("✅ Your Smoothie has been ordered!")
-        st.write("### Order Details")
+
+        st.write("### Order Summary")
         st.write(f"**Name:** {name_on_order}")
-        st.write(f"**Ingredients:** {ingredients_string}")
+        st.write(f"**Selected Fruits:** {', '.join(ingredients_list)}")
+        st.write(f"**Stored in Database (SEARCH_ON):** {ingredients_string}")
