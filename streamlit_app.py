@@ -1,63 +1,114 @@
-# Import python packages
 import streamlit as st
+import pandas as pd
+import requests
 from snowflake.snowpark.functions import col
 
-# Write directly to the app
-st.title("Customize Your Smoothie :cup_with_straw:")
-st.write(
-    """Choose the fruits you want in your custom Smoothie!"""
-)
+# -----------------------------
+# Page Title
+# -----------------------------
+st.title("Customize Your Smoothie 🥤")
+st.write("Choose the fruits you want in your custom Smoothie!")
 
-name_on_order = st.text_input('Name on Smoothie:')
-st.write('The name of your smoothie will be:', name_on_order)
+# -----------------------------
+# Customer Name
+# -----------------------------
+name_on_order = st.text_input("Name on Smoothie")
 
+if name_on_order:
+    st.write("The name of your smoothie will be:", name_on_order)
+
+# -----------------------------
 # Connect to Snowflake
+# -----------------------------
 cnx = st.connection("snowflake")
 session = cnx.session()
 
-my_dataframe = (
+# -----------------------------
+# Read Fruit Options
+# -----------------------------
+fruit_df = (
     session.table("smoothies.public.fruit_options")
     .select(
-        col('FRUIT_NAME'),
-        col('SEARCH_ON')
+        col("FRUIT_NAME"),
+        col("SEARCH_ON")
     )
+    .to_pandas()
 )
 
-# Convert SnowPark dataframe to Pandas dataframe so we can use LOC function
-pd_df = my_dataframe.to_pandas()
-
+# -----------------------------
+# Fruit Selection
+# -----------------------------
 ingredients_list = st.multiselect(
-    'Choose upto 5 ingredients:',
-    pd_df['FRUIT_NAME'].tolist(),
+    "Choose up to 5 ingredients:",
+    fruit_df["FRUIT_NAME"].tolist(),
     max_selections=5
 )
 
+# -----------------------------
+# Display Nutrition Information
+# -----------------------------
+ingredients_string = ""
+
 if ingredients_list:
-    ingredients_string = ''
 
-    for fruit_chosen in ingredients_list:
-        ingredients_string += fruit_chosen + ' '
+    ingredients_string = " ".join(ingredients_list)
 
-        search_on = pd_df.loc[
-            pd_df['FRUIT_NAME'] == fruit_chosen,
-            'SEARCH_ON'
+    for fruit in ingredients_list:
+
+        search_on = fruit_df.loc[
+            fruit_df["FRUIT_NAME"] == fruit,
+            "SEARCH_ON"
         ].iloc[0]
 
-        st.write(
-            'The search value for ',
-            fruit_chosen,
-            ' is ',
-            search_on,
-            '.'
-        )
+        st.subheader(f"{fruit} Nutrition Information")
 
-    my_insert_stmt = """
-        INSERT INTO smoothies.public.orders(ingredients, name_on_order)
-        VALUES ('""" + ingredients_string + """','""" + name_on_order + """')
-    """
+        url = f"https://fruityvice.com/api/fruit/{search_on}"
 
-    time_to_insert = st.button('Submit Order')
+        try:
+            response = requests.get(url)
 
-    if time_to_insert:
-        session.sql(my_insert_stmt).collect()
-        st.success('Your Smoothie is ordered!', icon="✅")
+            if response.status_code == 200:
+
+                fruit_data = response.json()
+
+                nutrition = fruit_data["nutritions"]
+
+                nutrition_df = pd.DataFrame(
+                    {
+                        "Nutrition": nutrition.keys(),
+                        "Value": nutrition.values()
+                    }
+                )
+
+                st.dataframe(
+                    nutrition_df,
+                    use_container_width=True
+                )
+
+            else:
+                st.error(f"Could not retrieve nutrition data for {fruit}")
+
+        except Exception as e:
+            st.error(e)
+
+# -----------------------------
+# Submit Order
+# -----------------------------
+if st.button("Submit Order"):
+
+    if name_on_order == "":
+        st.warning("Please enter your name.")
+    elif len(ingredients_list) == 0:
+        st.warning("Please choose at least one fruit.")
+    else:
+
+        session.sql(
+            """
+            INSERT INTO smoothies.public.orders
+            (ingredients, name_on_order)
+            VALUES (?, ?)
+            """,
+            params=[ingredients_string, name_on_order]
+        ).collect()
+
+        st.success("✅ Your Smoothie is ordered!")
